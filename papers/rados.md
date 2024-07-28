@@ -77,10 +77,12 @@ Each cluster map has the following information:
 |Number of PGs||
 |CRUSH|placement rules to map each PG to OSDs|
 
-* epoch incremented, whenever data is affected (eg: OSD device failure, PG groups changes etc)
+* epoch incremented, whenever data is affected (eg: OSD device failure, PG
+  groups changes etc)
     * Allows everyone to agree on the current data distribution
     * Helps figure out out-of-data information for all systems
-* Updates delivered as incremental maps, small messages describing the difference between two successive epochs
+* Updates delivered as incremental maps, small messages describing the
+  difference between two successive epochs
 
 Possible state of OSDs: 
 |OSD State|Description|
@@ -94,26 +96,36 @@ The above possible states facilitates a variety os scenarios.
 
 ### Map Propagation
 
-- OSDs are responsible for sharing map updates along with inter OSD communication + hearbeat messages
+- OSDs are responsible for sharing map updates along with inter OSD
+  communication + hearbeat messages
     - Only the diff is shared, ensure minimal amount of data present in messages
-- Updates are lazily propagated, OSDs receive updates as and when they interact with the cluster
+- Updates are lazily propagated, OSDs receive updates as and when they interact
+  with the cluster
 - Each OSD does:
     - maintains history of past incremental updates 
-    - tag all messages (_heartbeat messages included_) with its latest epoch (_helps in finding stale data_)
-    - keeps track of most recent epoch present at each peer (_helps in sending updates to relevant peers_)
+    - tag all messages (_heartbeat messages included_) with its latest epoch
+      (_helps in finding stale data_)
+    - keeps track of most recent epoch present at each peer (_helps in sending
+      updates to relevant peers_)
     - periodically sends heartbeat messages for failure detection
-- When contacting peers with old epoch, **incremental updates** are shared to bring that peer in sync.
+- When contacting peers with old epoch, **incremental updates** are shared to
+  bring that peer in sync.
 - Map updates are shared only b/w communicating OSDs (i.e the OSD who share PGs)
-    - **preemptive map sharing strategy**, OSD will always share an update when contancting a peer
-    - duplicate messages - bounded by number of peers, peers are determined by number of PGs it manage
+    - **preemptive map sharing strategy**, OSD will always share an update when
+      contancting a peer
+    - duplicate messages - bounded by number of peers, peers are determined by
+      number of PGs it manage
 
 #### OSD booting
 
-- OSD booting up, it informs the monitor with it's latest epoch it is booting up with
+- OSD booting up, it informs the monitor with it's latest epoch it is booting up
+  with
 - Monitor cluster, updates the OSD state in the global cluster map as up
     - Monitor shares the incremental updates to bring it fully up to date
-- Newly booted OSD, sends heartbeart messages and incremental updates to it's "unaware" peers (set of devices who are affected by its status change)
-    - The incremental update shared by new OSD includes the last 30 seconds of updates
+- Newly booted OSD, sends heartbeart messages and incremental updates to it's
+  "unaware" peers (set of devices who are affected by its status change)
+    - The incremental update shared by new OSD includes the last 30 seconds of
+      updates
 
 
 ### 2.2 Data Placement
@@ -136,8 +148,10 @@ RADOS **pseudo-randomly distributes objects** to devices, maintaining a **balanc
 
 - CRUSH: Controlled, Scalable, Decentralized Placement of Replicated Data
     * algorithm to calculate pseudo random mapping
-    * a robust replica distribution algorithm, similar to a hash function (but safe)
-    * maintains balanced distribution, when devices join/leave - most PG remain where they are
+    * a robust replica distribution algorithm, similar to a hash function (but
+      safe)
+    * maintains balanced distribution, when devices join/leave - most PG remain
+      where they are
 - maps each PG to an ordered list of r OSDs
     * The order of the OSD decided which are primary and which are replicas
 
@@ -167,10 +181,13 @@ Data distribution encapsulated in cluster map allows OSDs to self manage the bel
 
 <FIGURE 2: FROM PAPER>
 
-- Client talks to only ONE OSD, the replication are then managed by OSD peers themselves.
-    - The cluster ensures: replicas are safely updated and consistent read/write preserved
+- Client talks to only ONE OSD, the replication are then managed by OSD peers
+  themselves.
+    - The cluster ensures: replicas are safely updated and consistent read/write
+      preserved
     - Question: What happens when the replica goes down during a write?
-- Once all replicas are updates, a single acknowledgment is returned to the client.
+- Once all replicas are updates, a single acknowledgment is returned to the
+  client.
 
 Three types of replication:
 
@@ -230,3 +247,36 @@ We have the following cases:
       happen
 
 #### Read Consistency
+
+This is a bit harder than updates. 
+
+Scenario: In event of network failure, OSD becomes partially unreachable:
+  - OSD servicing reads for a PG could be declared failed
+  - yet, OSD is still reachable
+
+How do we prevent reads operation being processed by old OSDs?, Heartbeat
+messages:
+  - Peer OSDs (the OSD responsible for PG) needs to share heartbeat messages
+    with each other for the PG to remain redable
+  - If OSD servicing reads, does not get heartbeats from other replicas in H
+    seconds, it will block reads
+      - This makes sure that, we do not serve if any of the participating OSD is
+        down or was moved away from PG membership
+  - Before another OSD takes over primary, it should receive a positive ACK from
+    old primary
+
+## 3.3 Failure Detection
+- RADOS uses point-to-point message passing libary for communication
+    - a pattern in which producers send messages typically intended for a single
+      consumer.
+    - sender <--> queue <--> receiver
+    - basically means any message b/w two OSD is unique
+- Failure, unable to connect to a TCP socket after limited number of reconnect
+  attempts
+- Failure is reported to Monitor
+- Nodes exchange Heartbeat messages with their peers to detect device failures
+    - i.e if heartbeat messages fails, the OSD knows something is wrong and
+      reports to monitor
+- OSD who discover they are marked down, kill themselves
+
+## 3.4 Data Migration and Failure Recovery
