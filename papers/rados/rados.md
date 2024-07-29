@@ -132,7 +132,7 @@ The above possible states facilitates a variety os scenarios.
 
 RADOS **pseudo-randomly distributes objects** to devices, maintaining a **balanced distribution** of data on all devices.
 
-<PHOTO of entire data pass through from conf talk>
+![data placements](/papers/rados/data-placement.jpg)
 
 #### Step 1: Map objects to Placement groups
 
@@ -159,7 +159,9 @@ RADOS **pseudo-randomly distributes objects** to devices, maintaining a **balanc
 
 Three ways of replication:
 
-<PHOTO OF why placement groups>
+![WHY-PG-1](/papers/rados/why-pg-1.jpg)
+
+![WHY-PG-2](/papers/rados/why-pg-2.jpg)
 
 | replication type   | description<br>(3 way replication) | disk fails                                                                                                                                                                              | Concurrent Failure<br> (Triple failures)                                                                                                                                                                                            |   |
 |--------------------|------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---|
@@ -179,7 +181,7 @@ Data distribution encapsulated in cluster map allows OSDs to self manage the bel
 
 ## 3.1 Replication
 
-<FIGURE 2: FROM PAPER>
+![replication](/papers/rados/replication.png)
 
 - Client talks to only ONE OSD, the replication are then managed by OSD peers
   themselves.
