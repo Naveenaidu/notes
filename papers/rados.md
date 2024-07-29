@@ -280,3 +280,82 @@ messages:
 - OSD who discover they are marked down, kill themselves
 
 ## 3.4 Data Migration and Failure Recovery
+
+- Data migration and failure recovery driven entirely by cluster map updates
+- RADOS assumes no data distribution continuity between two maps
+- OSDs aggressively replicate PG Metadata:
+    * PG logs: a list of recent updates made to objects in a PG
+    * current object contents (object version), even when object replicas are locally missing
+
+## 3.4.1 Peering
+
+The process of bringing all the OSD that store/share a PG into agreement about
+the state of all the objects in that PG and the metadata associated with those
+objects.
+
+- On receiving cluster map update
+    * incrementally walks through all recent map updates to update PG state
+        * this ensures intermediate data distributions are taken into
+      considerations (for eg: OSD is removed from PG and added again)
+    * if active list of OSDs changed, must re-peer with all OSDs listed
+- PG's primary OSD drives peering
+- All replica OSDs send Notify messages to the current primary, this informs new primary about it's role
+    * Notify message - PG state information, most recent update, PG logs and recent epoch
+- Once the new primary is aware - two steps: (Update PG logs & Update the PG object contents):
+    * generates and queries prior set of OSD for log fragments (the OSD prev having the PG)
+    * using logs, brings all the active replicas up to data
+    * if logs insufficient, complete PG contents generated
+
+## 3.4.2 Recovery
+
+- parellelized, declustered replication
+- recovery bottleneck, reading and seeking
+    * if all OSDs fetched missing objects of PG, duplication happens (which is bad)
+    * update replication protocols becomes complex
+- Hence, Primary coordinates the PG recovery
+- All operations on missing object delayed until Primary has copy
+- If primary has a copy: it knows which replicas need it from the peering process and sends them a copy.
+- Primary always push the objects to replicas
+
+## 4. Monitors
+
+* makes use of Paxos
+* CP, not AP
+* responsible for managing the master copy of cluster map
+* majority of cluster map must be online to read/update the cluster map.
+
+### Paxos Service 
+- initally a leader is elected to serialise map updates and maintain consistency. 
+    - a probe to fetch the latest epoch of all other monitors is send which must be responded to in time T. 
+    - if majority of monitors respond and a quorum is established:
+        - the latest communicated epoch is sent to all active monitors. 
+        - short term leases are distributed. 
+- updates are forwarded to leader monitor: aggregates them and periodically udpates map by incrementing the epoch
+    - distributes the new epoch to active monitors and revokes existing leases 
+    - if majority acknowledge, the new map change is committed and new leases are issued. 
+
+- leases give monitors ability to distribute cluster map to clients and OSDs. 
+- an election is called when: 
+    - if lease expires without getting renewed, leader is understood to be unreachable and election is called.
+    - if leases are not acknowledged back to leader, previously active monitor is assumed to be dead and an election is called. 
+    - a new monitor boots us / previous election did not complete within a reasonable time, an election is called.  
+
+
+### Workload on monitors 
+
+- distribution of map updates among OSDs is generally handled by OSDs themselves. 
+- leases allow all active montiors to service reads from clients and rarely OSDs. 
+- updates are handled by leader alone, which in turn aggregates so that map updates are tunable and independent on size of cluster.
+- maximum number of possible failure report load on leader monitor: 
+    - if each OSD stores X PGs, and Y OSDs fail: load is propotional to XY. 
+- to prevent such a deluge: 
+    - OSDs do heartbeat check semi randomly, so failure reports are staggered. 
+    - reports are forwarded to monitor cluster: throttles and batched proptional to the cluster size.
+    - active monitors forward these reports to leader only once. 
+- final maximum load on leader monitor = YM where M is size of monitor cluster. 
+
+## Questions
+- How is authorization done? i.e how is data access restricted?
+- How are software updates to the OSD and monitor deployed
+- What actually happens in CRUSH, how was it built
+
